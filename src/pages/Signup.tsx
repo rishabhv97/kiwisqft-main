@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { supabase } from '../supabaseClient';
 import { useNavigate, Link } from 'react-router-dom';
 import { UserPlus, Mail, Lock, User, Phone, Briefcase, Loader2, AlertCircle } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const Signup: React.FC = () => {
   const navigate = useNavigate();
@@ -10,42 +10,40 @@ const Signup: React.FC = () => {
     password: '',
     name: '',
     phone: '',
-    role: 'Buyer' // Default role
+    role: 'User' // Default to User (Buyer)
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
+  // Handle Input Changes
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  // Handle Form Submission
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
 
     try {
-      // 1. Sign up with Supabase Auth
-      const { data, error: authError } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            name: formData.name,
-            phone: formData.phone,
-            role: formData.role, // This triggers the trigger we made in SQL
-          },
-        },
+      // CHANGED: Send data to Node.js Backend instead of Supabase
+      const response = await fetch('http://localhost:5000/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
       });
 
-      if (authError) throw authError;
+      const data = await response.json();
 
-      if (data.user) {
-        alert('Signup successful! You can now log in.');
-        navigate('/login');
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to sign up');
       }
+
+      toast.success('Account created! Please log in.');
+      navigate('/login');
+
     } catch (err: any) {
-      setError(err.message || 'Failed to sign up');
+      console.error(err);
+      toast.error(err.message || 'Signup failed');
     } finally {
       setLoading(false);
     }
@@ -61,12 +59,6 @@ const Signup: React.FC = () => {
           <h2 className="mt-4 text-3xl font-extrabold text-gray-900">Create Account</h2>
           <p className="mt-2 text-sm text-gray-600">Join Kiwi Sqft to buy, sell, or rent properties</p>
         </div>
-
-        {error && (
-          <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2">
-            <AlertCircle size={16} /> {error}
-          </div>
-        )}
 
         <form className="mt-8 space-y-4" onSubmit={handleSignup}>
           
@@ -108,9 +100,9 @@ const Signup: React.FC = () => {
             <select name="role"
               className="pl-10 w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-green focus:border-brand-green outline-none bg-white"
               onChange={handleChange} value={formData.role}>
-              <option value="Buyer">I want to Buy/Rent</option>
-              <option value="Seller">I want to Sell/Lease</option>
-              
+              <option value="User">I want to Buy/Rent (User)</option>
+              <option value="Owner">I want to Sell (Owner)</option>
+              <option value="Broker">I am an Agent (Broker)</option>
             </select>
           </div>
 

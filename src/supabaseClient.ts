@@ -1,6 +1,21 @@
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Emergency Fix: Prevent app crash by exporting a dummy object
+// This allows the app to load so you can see which pages still need updating.
+export const supabase = {
+  auth: {
+    getSession: () => ({ data: { session: null } }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    signOut: () => {},
+  },
+  from: () => ({
+    select: () => ({ eq: () => ({ single: () => ({}) }) }),
+    insert: () => ({}),
+    upload: () => ({}),
+    getPublicUrl: () => ({ data: { publicUrl: "" } })
+  }),
+  storage: {
+    from: () => ({
+      upload: () => ({}),
+      getPublicUrl: () => ({ data: { publicUrl: "" } })
+    })
+  }
+};
