@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext'; // Uses your new AuthContext
-import { Property } from '../types';
+import { useAuth } from '../context/AuthContext';
+import { Property, PropertyType, ListingType, FurnishedStatus, ConstructionStatus, Facing, ParkingType, ListedBy } from '../types';
 import PropertyCard from '../components/PropertyCard';
 import { Building, Plus, Loader2, LogOut } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -19,37 +19,87 @@ const UserDashboard: React.FC = () => {
 
     const fetchMyProperties = async () => {
       try {
-        // Fetch ALL properties from backend
-        const response = await fetch('http://localhost:5000/api/properties');
+        const response = await fetch(`http://localhost:5000/api/properties/user/${user.id}`);
         const data = await response.json();
 
-        if (data) {
-          // Filter locally for properties owned by the logged-in user
-          // Note: In a real production app, you'd create a specific API endpoint like /api/my-properties
-          const myProperties = data.filter((p: any) => p.owner_id === user.id);
+        if (Array.isArray(data)) {
+          const mapped = data.map((p: any) => {
+            
+            // Helper to parse JSON fields safely
+            const parseJson = (val: any) => {
+                if (typeof val === 'string') {
+                    try { return JSON.parse(val); } catch (e) { return []; }
+                }
+                return Array.isArray(val) ? val : [];
+            };
 
-          const mapped: Property[] = myProperties.map((p: any) => ({
-            id: p.id,
-            title: p.title,
-            description: p.description,
-            price: p.price,
-            location: p.location,
-            city: p.city,
-            type: p.type,
-            listingType: p.listing_type,
-            images: typeof p.images === 'string' 
-                ? JSON.parse(p.images).map((img: string) => `http://localhost:5000${img}`)
-                : [],
-            bedrooms: p.bedrooms,
-            bathrooms: p.bathrooms,
-            balconies: p.balconies,
-            area: p.area,
-            amenities: typeof p.amenities === 'string' ? JSON.parse(p.amenities) : [],
-            ownerId: p.owner_id,
-            status: p.status,
-            datePosted: p.created_at,
-            // ... map other fields as needed
-          }));
+            // Helper to parse images specifically
+            const parseImages = (val: any) => {
+                const parsed = parseJson(val);
+                return parsed.map((img: string) => 
+                    img.startsWith('http') ? img : `http://localhost:5000${img}`
+                );
+            };
+
+            // Construct the Property object with explicit casting to fix Red Line
+            const propertyObj: Property = {
+                id: p.id,
+                title: p.title,
+                description: p.description,
+                price: Number(p.price) || 0,
+                location: p.location,
+                city: p.city,
+                
+                // Cast Enums to 'any' or specific types to satisfy TypeScript
+                type: p.type as PropertyType, 
+                listingType: p.listing_type as ListingType,
+                
+                images: parseImages(p.images),
+                bedrooms: Number(p.bedrooms) || 0,
+                bathrooms: Number(p.bathrooms) || 0,
+                balconies: Number(p.balconies) || 0,
+                area: Number(p.area) || 0,
+                
+                // Optional fields mapped safely
+                carpetArea: Number(p.carpet_area) || 0,
+                builtUpArea: Number(p.built_up_area) || 0,
+                superBuiltUpArea: Number(p.super_built_up_area) || 0,
+                
+                amenities: parseJson(p.amenities),
+                additionalRooms: parseJson(p.additional_rooms),
+                documents: parseJson(p.available_documents),
+                views: parseJson(p.views),
+                
+                ownerId: p.owner_id,
+                // These two were likely causing the Red Line if missing:
+                ownerContact: p.owner_contact || user.phone || '', 
+                listedBy: (p.listed_by as ListedBy) || 'Owner',
+
+                status: p.status,
+                datePosted: p.created_at,
+                
+                furnishedStatus: p.furnished_status as FurnishedStatus,
+                constructionStatus: p.construction_status as ConstructionStatus,
+                yearBuilt: Number(p.year_built) || 0,
+                floor: Number(p.floor_no) || 0,
+                totalFloors: Number(p.total_floors) || 0,
+                facing: p.facing_entry as Facing,
+                exitFacing: p.facing_exit as Facing,
+                parkingType: p.parking_type as ParkingType,
+                parkingSpaces: Number(p.parking_spaces) || 0,
+                
+                isFeatured: Boolean(p.is_featured),
+                reraApproved: Boolean(p.rera_approved),
+                allInclusivePrice: Boolean(p.is_all_inclusive_price),
+                priceNegotiable: Boolean(p.price_negotiable),
+                taxExcluded: Boolean(p.is_tax_excluded),
+                hasShowcase: Boolean(p.is_virtual_showcase),
+                has3DVideo: Boolean(p.is_3d_video),
+            };
+
+            return propertyObj;
+          });
+          
           setProperties(mapped);
         }
       } catch (err) {
@@ -93,7 +143,6 @@ const UserDashboard: React.FC = () => {
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                 <p className="text-gray-500 text-xs font-bold uppercase">Active Leads</p>
                 <p className="text-3xl font-bold text-blue-600 mt-2">0</p> 
-                {/* Note: You need to implement a Leads API to fetch this real number */}
             </div>
             <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                 <p className="text-gray-500 text-xs font-bold uppercase">Account Status</p>
@@ -110,8 +159,16 @@ const UserDashboard: React.FC = () => {
                     {properties.map(property => (
                         <div key={property.id} className="relative group">
                             <PropertyCard property={property} />
-                            <div className="absolute top-2 right-2 bg-white px-2 py-1 rounded text-xs font-bold shadow-sm">
-                                Status: <span className={`${property.status === 'Approved' ? 'text-green-600' : 'text-orange-500'}`}>{property.status}</span>
+                            
+                            {/* Status Badge */}
+                            <div className="absolute top-2 right-2 bg-white/95 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-bold shadow-sm border border-gray-100 z-10">
+                                Status: <span className={`
+                                    ${property.status === 'Approved' ? 'text-green-600' : ''}
+                                    ${property.status === 'Pending' ? 'text-orange-500' : ''}
+                                    ${property.status === 'Rejected' ? 'text-red-500' : ''}
+                                `}>
+                                    {property.status}
+                                </span>
                             </div>
                         </div>
                     ))}

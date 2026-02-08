@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Search, MapPin, ArrowRight, TrendingUp, ChevronRight, UserCheck, Phone, ShieldCheck, Home as HomeIcon } from 'lucide-react';
+import { Search, ArrowRight, TrendingUp, Home as HomeIcon } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import PropertyCard from '../components/PropertyCard';
 import { Property } from '../types';
-import { supabase } from '../supabaseClient';
 
 interface LocalityStats {
   name: string;
@@ -39,37 +38,36 @@ const Home: React.FC = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // 1. Fetch Featured Properties (Limit 8)
-        const { data: featData } = await supabase
-          .from('properties')
-          .select('*')
-          .eq('status', 'Approved')
-          .order('is_featured', { ascending: false }) // Featured first
-          .order('created_at', { ascending: false })  // Then newest
-          .limit(8);
+        // 1. Fetch All Properties from Node.js Backend
+        const response = await fetch('http://localhost:5000/api/properties');
+        const data = await response.json();
 
-        if (featData) {
-           const mappedFeatured: Property[] = featData.map((p: any) => ({
+        if (Array.isArray(data)) {
+           // --- A. Process Featured Properties (Latest 8) ---
+           const mappedProperties: Property[] = data.map((p: any) => ({
               id: p.id,
               title: p.title,
               description: p.description,
-              price: p.price,
+              price: Number(p.price),
               location: p.location,
               city: p.city,
               type: p.type,
               listingType: p.listing_type,
-              images: p.images || [], 
-              bedrooms: p.bedrooms,
-              bathrooms: p.bathrooms,
-              balconies: p.balconies,
-              area: p.area, 
-              carpetArea: p.carpet_area,
-              builtUpArea: p.built_up_area,
-              superBuiltUpArea: p.super_built_up_area,
-              amenities: p.amenities || [],
+              // Parse images safely
+              images: typeof p.images === 'string' 
+                ? JSON.parse(p.images).map((img: string) => img.startsWith('http') ? img : `http://localhost:5000${img}`)
+                : [],
+              bedrooms: Number(p.bedrooms),
+              bathrooms: Number(p.bathrooms),
+              balconies: Number(p.balconies),
+              area: Number(p.area),
+              carpetArea: Number(p.carpet_area),
+              builtUpArea: Number(p.built_up_area),
+              superBuiltUpArea: Number(p.super_built_up_area),
+              amenities: typeof p.amenities === 'string' ? JSON.parse(p.amenities) : [],
               ownerContact: p.owner_contact,
               datePosted: p.created_at,
-              isFeatured: p.is_featured,
+              isFeatured: Boolean(p.is_featured),
               status: p.status,
               ownerId: p.owner_id,
               furnishedStatus: p.furnished_status,
@@ -81,63 +79,46 @@ const Home: React.FC = () => {
               floor: p.floor_no,
               totalFloors: p.total_floors,
               parkingSpaces: p.parking_spaces,
-              views: p.views || [],
-              documents: p.available_documents || []
+              views: typeof p.views === 'string' ? JSON.parse(p.views) : [],
+              documents: typeof p.available_documents === 'string' ? JSON.parse(p.available_documents) : []
            }));
-           setFeaturedProperties(mappedFeatured);
+
+           // Set the latest 8 properties as "Featured"
+           setFeaturedProperties(mappedProperties.slice(0, 8));
+
+           // --- B. Calculate Popular Localities Dynamically ---
+           const locMap = mappedProperties.reduce((acc: any, curr: Property) => {
+             const loc = curr.location || 'Unknown';
+             if (!acc[loc]) {
+               // Use the first image of the property as the location thumbnail
+               const img = (curr.images && curr.images.length > 0) 
+                  ? curr.images[0] 
+                  : 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=600&q=80';
+               acc[loc] = { count: 0, totalPrice: 0, image: img };
+             }
+             acc[loc].count += 1;
+             acc[loc].totalPrice += curr.price;
+             return acc;
+           }, {});
+
+           const derivedLocalities = Object.keys(locMap).map(key => ({
+             name: key,
+             count: locMap[key].count,
+             avgPrice: Math.round(locMap[key].totalPrice / locMap[key].count),
+             image: locMap[key].image
+           }))
+           .sort((a, b) => b.count - a.count) // Sort by most properties
+           .slice(0, 8); // Top 8 localities
+
+           setLocalities(derivedLocalities);
         }
 
-        // 2. Fetch Sellers
-        const { data: sellerData } = await supabase
-          .from('profiles')
-          .select('*')
-          .in('role', ['Seller', 'Broker', 'Agent'])
-          .limit(6);
-
-        if (sellerData) {
-          const formattedSellers = sellerData.map((profile) => ({
-            id: profile.id,
-            name: profile.name || profile.full_name || 'Verified Seller',
-            role: profile.role,
-            image: profile.avatar_url || `https://ui-avatars.com/api/?name=${profile.name}&background=0D8ABC&color=fff`,
-            experience: `${Math.floor(Math.random() * 15) + 2} Yrs`, 
-            propertiesCount: Math.floor(Math.random() * 50) + 5,
-            localities: ['Noida', 'Greater Noida']
-          }));
-          setSellers(formattedSellers);
-        }
-
-        // 3. Calculate Popular Localities
-        const { data: allProps } = await supabase
-          .from('properties')
-          .select('location, price, images');
-
-        if (allProps && allProps.length > 0) {
-          const locMap = allProps.reduce((acc: any, curr: any) => {
-            const loc = curr.location || 'Unknown';
-            if (!acc[loc]) {
-              const img = (curr.images && curr.images.length > 0) ? curr.images[0] : 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=600&q=80';
-              acc[loc] = { count: 0, totalPrice: 0, image: img };
-            }
-            acc[loc].count += 1;
-            acc[loc].totalPrice += curr.price;
-            return acc;
-          }, {});
-
-          const derivedLocalities = Object.keys(locMap).map(key => ({
-            name: key,
-            count: locMap[key].count,
-            avgPrice: Math.round(locMap[key].totalPrice / locMap[key].count),
-            image: locMap[key].image
-          })).sort((a, b) => b.count - a.count).slice(0, 8);
-
-          setLocalities(derivedLocalities);
-        } else {
-            setLocalities([
-                { name: 'Sector 150', count: 0, avgPrice: 12000, image: 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=600&q=80' },
-                { name: 'Greater Noida', count: 0, avgPrice: 8500, image: 'https://images.unsplash.com/photo-1582407947304-fd86f028f716?auto=format&fit=crop&w=600&q=80' },
-            ]);
-        }
+        // 2. Sellers (Static for now as DB doesn't have profile images/experience yet)
+        setSellers([
+            { id: '1', name: 'Rajesh Kumar', role: 'Agent', experience: '8 Yrs', propertiesCount: 12, localities: ['Noida'], image: 'https://ui-avatars.com/api/?name=Rajesh+Kumar&background=0D8ABC&color=fff' },
+            { id: '2', name: 'Amit Singh', role: 'Broker', experience: '5 Yrs', propertiesCount: 8, localities: ['Greater Noida'], image: 'https://ui-avatars.com/api/?name=Amit+Singh&background=random&color=fff' },
+            { id: '3', name: 'Sneha Gupta', role: 'Owner', experience: '2 Yrs', propertiesCount: 3, localities: ['Sector 62'], image: 'https://ui-avatars.com/api/?name=Sneha+Gupta&background=random&color=fff' },
+        ]);
 
       } catch (error) {
         console.error("Error fetching home data:", error);
@@ -159,6 +140,7 @@ const Home: React.FC = () => {
   };
 
   const formatPrice = (price: number) => {
+    if (price >= 10000000) return `₹${(price / 10000000).toFixed(1)}Cr`;
     return `₹${(price / 100000).toFixed(1)}L`;
   };
 
@@ -232,7 +214,7 @@ const Home: React.FC = () => {
           <Link to="/buy" className="hidden sm:flex items-center gap-2 text-brand-green font-bold hover:gap-3 transition-all">See All <ArrowRight size={20} /></Link>
         </div>
         <div className="flex overflow-x-auto pb-6 gap-5 snap-x snap-mandatory -mx-4 px-4 sm:mx-0 sm:px-0">
-          {localities.map((loc) => (
+          {localities.length > 0 ? localities.map((loc) => (
             <div key={loc.name} onClick={() => navigate(`/buy?search=${loc.name}`)} className="min-w-[200px] sm:min-w-[240px] flex-shrink-0 snap-start bg-white rounded-xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all cursor-pointer group">
               <div className="relative h-32 md:h-40 overflow-hidden">
                 <img src={loc.image} alt={loc.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
@@ -243,10 +225,12 @@ const Home: React.FC = () => {
                  <div className="flex justify-between text-xs text-gray-500 mb-1">
                     <span>Avg ~{formatPrice(loc.avgPrice)}</span>
                  </div>
-                 <p className="text-sm font-medium text-gray-900">{loc.count}+ Properties</p>
+                 <p className="text-sm font-medium text-gray-900">{loc.count} Properties</p>
               </div>
             </div>
-          ))}
+          )) : (
+             <div className="col-span-full text-gray-500 p-4">No data available yet. Start posting properties!</div>
+          )}
         </div>
       </div>
 
@@ -255,7 +239,7 @@ const Home: React.FC = () => {
         <div className="flex justify-between items-end mb-8">
           <div>
             <h2 className="text-2xl md:text-3xl font-bold text-gray-900">Featured Properties</h2>
-            <p className="text-gray-500 mt-1">Handpicked projects for you</p>
+            <p className="text-gray-500 mt-1">Latest handpicked projects for you</p>
           </div>
           <Link to="/buy" className="hidden sm:flex items-center gap-2 text-brand-green font-bold hover:gap-3 transition-all">See All <ArrowRight size={20} /></Link>
         </div>

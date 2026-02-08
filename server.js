@@ -76,6 +76,22 @@ app.post('/api/auth/login', async (req, res) => {
 
 // --- 2. PROPERTY ROUTES (With Filtering) ---
 
+// GET PROPERTIES BY USER (For User Dashboard)
+app.get('/api/properties/user/:uid', async (req, res) => {
+    try {
+        const { uid } = req.params;
+        // Select ALL properties for this user, regardless of status
+        const [rows] = await pool.query(
+            'SELECT * FROM properties WHERE owner_id = ? ORDER BY created_at DESC', 
+            [uid]
+        );
+        res.json(rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Failed to fetch user properties" });
+    }
+});
+
 app.get('/api/properties', async (req, res) => {
     try {
         const { type, listingType, search, minPrice, maxPrice, bedrooms } = req.query;
@@ -203,6 +219,7 @@ app.get('/api/admin/leads', async (req, res) => {
     }
 });
 
+
 // Get All Users
 app.get('/api/admin/users', async (req, res) => {
     try {
@@ -231,6 +248,29 @@ app.put('/api/admin/properties/:id/status', async (req, res) => {
         res.json({ message: `Property ${status}` });
     } catch (err) {
         res.status(500).json({ error: "Update failed" });
+    }
+});
+
+// Update User Role (Promote/Demote)
+app.put('/api/admin/users/:id/role', async (req, res) => {
+    try {
+        const { role } = req.body; // e.g., 'Broker', 'User'
+        await pool.query('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
+        res.json({ message: `User role updated to ${role}` }); // Changed message
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Update failed" });
+    }
+});
+
+// Delete Property
+app.delete('/api/admin/properties/:id', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM properties WHERE id = ?', [req.params.id]);
+        res.json({ message: "Property deleted successfully" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Delete failed. (Check if leads exist for this property)" });
     }
 });
 

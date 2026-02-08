@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, Mail, Phone, Shield, MoreVertical, Loader2 } from 'lucide-react';
+import { Search, Mail, Phone, Shield, MoreVertical, Loader2, Briefcase, CheckCircle, UserMinus } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface UserData {
@@ -17,23 +17,49 @@ const UserManagement: React.FC = () => {
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        const response = await fetch('http://localhost:5000/api/admin/users');
-        const data = await response.json();
-        
-        if (Array.isArray(data)) {
-            setUsers(data);
-        }
-      } catch (err) {
-        console.error(err);
-        toast.error("Failed to load users");
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchUsers();
   }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/admin/users');
+      const data = await response.json();
+      
+      if (Array.isArray(data)) {
+          setUsers(data);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load users");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Generic Function to Change Role
+  const handleRoleUpdate = async (userId: number, userName: string, newRole: string) => {
+      const action = newRole === 'Broker' ? 'promote' : 'demote';
+      if (!window.confirm(`Are you sure you want to ${action} ${userName} to ${newRole}?`)) return;
+
+      try {
+          const response = await fetch(`http://localhost:5000/api/admin/users/${userId}/role`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: newRole })
+          });
+
+          if (!response.ok) throw new Error("Failed to update role");
+
+          toast.success(`User role updated to ${newRole}`);
+          
+          // Update local state instantly
+          setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+
+      } catch (error) {
+          console.error(error);
+          toast.error("Error updating role");
+      }
+  };
 
   const filteredUsers = users.filter(u => 
     u.name.toLowerCase().includes(search.toLowerCase()) || 
@@ -63,7 +89,7 @@ const UserManagement: React.FC = () => {
           <thead className="bg-gray-50 text-gray-500 text-xs uppercase font-semibold">
             <tr>
               <th className="px-6 py-4">User</th>
-              <th className="px-6 py-4">Role</th>
+              <th className="px-6 py-4">Current Role</th>
               <th className="px-6 py-4">Contact</th>
               <th className="px-6 py-4">Join Date</th>
               <th className="px-6 py-4 text-right">Actions</th>
@@ -90,7 +116,8 @@ const UserManagement: React.FC = () => {
                     'bg-gray-100 text-gray-700'
                   }`}>
                     {user.role === 'Admin' && <Shield size={10} />}
-                    {user.role}
+                    {user.role === 'Broker' && <Briefcase size={10} />}
+                    {user.role === 'User' ? 'Buyer/User' : user.role}
                   </span>
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">
@@ -103,9 +130,38 @@ const UserManagement: React.FC = () => {
                   {new Date(user.created_at).toLocaleDateString()}
                 </td>
                 <td className="px-6 py-4 text-right">
-                  <button className="text-gray-400 hover:text-gray-600 p-2">
-                    <MoreVertical size={18} />
-                  </button>
+                  
+                  {/* Logic for Buttons */}
+                  
+                  {/* 1. If User/Owner -> Show "Make Agent" */}
+                  {(user.role === 'User' || user.role === 'Owner') && (
+                      <button 
+                        onClick={() => handleRoleUpdate(user.id, user.name, 'Broker')}
+                        className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition border border-blue-200 flex items-center gap-1 ml-auto"
+                        title="Promote to Agent"
+                      >
+                        <Briefcase size={14}/> Make Agent
+                      </button>
+                  )}
+
+                  {/* 2. If Broker (Agent) -> Show "Remove Agent" (Demote to User) */}
+                  {user.role === 'Broker' && (
+                      <button 
+                        onClick={() => handleRoleUpdate(user.id, user.name, 'User')}
+                        className="text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition border border-red-200 flex items-center gap-1 ml-auto"
+                        title="Demote to User"
+                      >
+                        <UserMinus size={14}/> Remove Agent
+                      </button>
+                  )}
+
+                  {/* 3. If Admin -> No Action */}
+                  {user.role === 'Admin' && (
+                      <span className="text-gray-400 text-xs flex items-center justify-end gap-1">
+                          <Shield size={14}/> Admin
+                      </span>
+                  )}
+
                 </td>
               </tr>
             ))}
