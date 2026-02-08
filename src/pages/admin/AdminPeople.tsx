@@ -1,108 +1,91 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '../../supabaseClient';
-import { Lead } from '../../types';
-import { Phone, Mail, Calendar, User, Loader2, MessageSquare } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Mail, Phone, Calendar, Search, MessageSquare, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
-const LeadCard: React.FC<{ lead: Lead }> = ({ lead }) => (
-    <div className="bg-white p-4 rounded-lg border border-gray-100 hover:shadow-md transition-shadow">
-        <div className="flex justify-between items-start mb-2">
-            <div>
-                <h4 className="font-bold text-gray-900">{lead.name}</h4>
-                <div className="flex gap-2 text-xs mt-1">
-                    <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded">{lead.interest}</span>
-                    <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{lead.source}</span>
-                </div>
-            </div>
-            <span className={`text-xs font-bold px-2 py-1 rounded-full ${
-                lead.status === 'New' ? 'bg-green-100 text-green-700' :
-                lead.status === 'Closed' ? 'bg-gray-100 text-gray-700' :
-                'bg-yellow-100 text-yellow-700'
-            }`}>{lead.status}</span>
-        </div>
-        
-        <div className="space-y-2 text-sm text-gray-500 mb-3">
-            <div className="flex items-center gap-2"><Phone size={14}/> {lead.phone}</div>
-            {lead.email && <div className="flex items-center gap-2"><Mail size={14}/> {lead.email}</div>}
-            <div className="flex items-center gap-2"><Calendar size={14}/> {new Date(lead.date).toLocaleDateString()}</div>
-            {/* Show Property ID if available */}
-            {lead.propertyId && (
-                <div className="text-xs bg-gray-50 p-1.5 rounded border border-gray-200 mt-1 truncate">
-                    Property ID: {lead.propertyId.slice(0,8)}...
-                </div>
-            )}
-        </div>
-
-        <div className="flex gap-2 border-t border-gray-100 pt-3">
-             <a href={`tel:${lead.phone}`} className="flex-1 py-1.5 text-center text-xs font-bold bg-brand-green text-white rounded hover:bg-emerald-800">
-                Call
-             </a>
-             <button className="flex-1 py-1.5 text-xs font-bold bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">
-                Details
-             </button>
-        </div>
-    </div>
-);
+interface Lead {
+    id: number;
+    buyer_name: string;
+    buyer_phone: string;
+    message: string;
+    property_title: string;
+    created_at: string;
+}
 
 const AdminPeople: React.FC = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
+    const fetchLeads = async () => {
+      try {
+        const response = await fetch('http://localhost:5000/api/admin/leads');
+        const data = await response.json();
+        if (Array.isArray(data)) setLeads(data);
+      } catch (err) {
+        toast.error("Failed to load leads");
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchLeads();
   }, []);
 
-  const fetchLeads = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('leads')
-        .select('*')
-        .order('created_at', { ascending: false });
+  const filteredLeads = leads.filter(l => 
+    l.buyer_name.toLowerCase().includes(search.toLowerCase()) ||
+    l.property_title?.toLowerCase().includes(search.toLowerCase())
+  );
 
-      if (error) throw error;
-
-      if (data) {
-        // Map DB to Types
-        const mappedLeads: Lead[] = data.map((l: any) => ({
-            id: l.id,
-            name: l.buyer_name,
-            phone: l.buyer_phone,
-            email: l.buyer_email || '',
-            propertyId: l.property_id,
-            interest: 'Buy', // Default to Buy for now
-            source: 'Website',
-            status: 'New', // Default status
-            date: l.created_at,
-            assignedAgent: '',
-            notes: l.message
-        }));
-        setLeads(mappedLeads);
-      }
-    } catch (error) {
-        console.error("Error loading leads:", error);
-    } finally {
-        setLoading(false);
-    }
-  };
-
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-brand-green"/></div>;
+  if (loading) return <div className="p-10 text-center"><Loader2 className="animate-spin inline"/> Loading Enquiries...</div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between border-b border-gray-200 pb-4">
-         <h1 className="text-2xl font-bold text-gray-900">Lead Management</h1>
-         <span className="bg-brand-green text-white px-3 py-1 rounded-full text-sm font-bold">{leads.length} Total</span>
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+      <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+        <h2 className="text-xl font-bold text-gray-800">Property Enquiries</h2>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+          <input 
+            type="text" 
+            placeholder="Search leads..." 
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-green outline-none"
+          />
+        </div>
       </div>
 
-      {leads.length === 0 ? (
-          <div className="text-center py-20 bg-gray-50 rounded-xl border border-dashed">
-              <MessageSquare className="mx-auto text-gray-300 mb-2" size={40} />
-              <p className="text-gray-500">No leads found yet.</p>
+      <div className="divide-y divide-gray-100">
+        {filteredLeads.map((lead) => (
+          <div key={lead.id} className="p-6 hover:bg-gray-50 transition">
+            <div className="flex justify-between items-start mb-2">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                  <MessageSquare size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-gray-900">{lead.buyer_name}</h4>
+                  <p className="text-xs text-gray-500 flex items-center gap-1">
+                    <Calendar size={12}/> {new Date(lead.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-medium bg-gray-100 px-2 py-1 rounded text-gray-600">
+                Property: {lead.property_title || 'Unknown ID: ' + lead.id}
+              </span>
+            </div>
+            
+            <div className="ml-14 space-y-2">
+              <div className="flex gap-4 text-sm text-gray-600">
+                 <span className="flex items-center gap-1"><Phone size={14}/> {lead.buyer_phone}</span>
+              </div>
+              <p className="text-gray-700 bg-gray-50 p-3 rounded-lg text-sm border border-gray-100">
+                "{lead.message}"
+              </p>
+            </div>
           </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {leads.map(lead => <LeadCard key={lead.id} lead={lead} />)}
-        </div>
-      )}
+        ))}
+        {filteredLeads.length === 0 && <div className="p-8 text-center text-gray-500">No enquiries found.</div>}
+      </div>
     </div>
   );
 };

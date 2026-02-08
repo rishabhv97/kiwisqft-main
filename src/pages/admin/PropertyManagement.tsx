@@ -1,250 +1,188 @@
-import React, { useState, useEffect } from 'react';
-import { supabase } from '../../supabaseClient';
-import { Property, PropertyStatus } from '../../types';
-import { Check, X, Eye, Trash2, ShieldCheck, FileText, PlusCircle, Loader2 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Property } from '../../types';
+import { Check, X, Search, Filter, Eye, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
-// No props needed anymore
-const PropertyManagement: React.FC = () => {
-  const navigate = useNavigate();
-  const [properties, setProperties] = useState<Property[]>([]); // Local state
+interface PropertyManagementProps {
+  properties?: Property[]; // Optional, as we fetch internally now
+  setProperties?: React.Dispatch<React.SetStateAction<Property[]>>;
+}
+
+const PropertyManagement: React.FC<PropertyManagementProps> = () => {
+  const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'All' | 'Pending' | 'Approved' | 'Rejected' | 'Sold'>('All');
-  const [selectedProp, setSelectedProp] = useState<Property | null>(null);
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState('All');
+  const [search, setSearch] = useState('');
 
-  // --- 1. Fetch Data on Mount ---
-  useEffect(() => {
-    fetchProperties();
-  }, []);
-
+  // 1. Fetch Properties from Node.js Backend
   const fetchProperties = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('properties')
-        .select('*')
-        .order('created_at', { ascending: false }); // Newest first
+      // Use the admin endpoint we created in server.js
+      const response = await fetch('http://localhost:5000/api/admin/properties');
+      const data = await response.json();
 
-      if (error) throw error;
-
-      if (data) {
-        // Map DB to Types
-        const mapped: Property[] = data.map((p: any) => ({
+      if (Array.isArray(data)) {
+        const mapped = data.map((p: any) => ({
+            ...p,
             id: p.id,
-            title: p.title,
-            description: p.description || '', // Required field
-            price: p.price,
-            location: p.location,
-            city: p.city,
-            type: p.type,
-            listingType: p.listing_type, // Required field
+            // Parse images if they are strings (MySQL JSON)
+            images: typeof p.images === 'string' ? JSON.parse(p.images) : p.images || [],
             status: p.status,
-            listedBy: p.listed_by,
             ownerId: p.owner_id,
-            images: p.images || [],
-            
-            // Required Room Details
-            bedrooms: p.bedrooms || 0,
-            bathrooms: p.bathrooms || 0,
-            balconies: p.balconies || 0,
-            
-            // Required Area & Contact
-            area: p.area || 0,
-            amenities: p.amenities || [], // Required field
-            ownerContact: p.owner_contact || '', // Required field
-            
-            datePosted: p.created_at,
-            documents: p.available_documents || [],
-            isVerified: p.is_verified // Ensure this matches interface boolean
+            datePosted: p.created_at
         }));
         setProperties(mapped);
       }
     } catch (err) {
-      console.error("Error fetching properties:", err);
+      console.error("Failed to fetch properties", err);
+      toast.error("Could not load properties");
     } finally {
       setLoading(false);
     }
   };
 
-  // --- Actions ---
+  useEffect(() => {
+    fetchProperties();
+  }, []);
 
-  const handleStatusChange = async (id: string, newStatus: PropertyStatus, isVerified: boolean) => {
-    setProcessingId(id);
+  // 2. Handle Status Update (Approve/Reject)
+  const handleStatusUpdate = async (id: string | number, newStatus: string) => {
     try {
-        const { error } = await supabase
-            .from('properties')
-            .update({ status: newStatus, is_verified: isVerified })
-            .eq('id', id);
+      const response = await fetch(`http://localhost:5000/api/admin/properties/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
 
-        if (error) throw error;
+      if (!response.ok) throw new Error("Update failed");
 
-        setProperties(prev => prev.map(p => 
-            p.id === id ? { ...p, status: newStatus, isVerified: isVerified } : p
-        ));
-        
-        if (selectedProp?.id === id) {
-            setSelectedProp(prev => prev ? { ...prev, status: newStatus, isVerified: isVerified } : null);
-        }
+      toast.success(`Property ${newStatus}`);
+      fetchProperties(); // Refresh list
     } catch (err) {
-        console.error("Error updating status:", err);
-        alert("Failed to update status.");
-    } finally {
-        setProcessingId(null);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure? This cannot be undone.")) return;
-    
-    setProcessingId(id);
-    try {
-      const { error } = await supabase.from('properties').delete().eq('id', id);
-      if (error) throw error;
-
-      setProperties(prev => prev.filter(p => p.id !== id));
-      if (selectedProp?.id === id) setSelectedProp(null);
-      alert("Property deleted successfully.");
-
-    } catch (err: any) {
-      console.error("Error deleting property:", err);
-      alert("Failed to delete. Check database policies.");
-    } finally {
-      setProcessingId(null);
+      toast.error("Failed to update status");
     }
   };
 
   const filteredProperties = properties.filter(p => {
-    if (filter === 'All') return true;
-    return p.status === filter;
+    const matchesFilter = filter === 'All' || p.status === filter;
+    const matchesSearch = p.title.toLowerCase().includes(search.toLowerCase()) || 
+                          p.location.toLowerCase().includes(search.toLowerCase());
+    return matchesFilter && matchesSearch;
   });
 
-  if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin text-brand-brown" /></div>;
+  if (loading) return <div className="p-8 text-center"><Loader2 className="animate-spin inline mr-2"/> Loading Properties...</div>;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-           <h1 className="text-2xl font-bold text-gray-900">Property Management</h1>
-           <p className="text-gray-500 text-sm">Manage listings and approvals.</p>
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="p-6 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h2 className="text-xl font-bold text-gray-800">Property Approvals</h2>
+        
+        <div className="flex gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input 
+              type="text" 
+              placeholder="Search properties..." 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-green outline-none"
+            />
+          </div>
+          <div className="relative">
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <select 
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="pl-10 pr-8 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-brand-green outline-none appearance-none bg-white"
+            >
+              <option value="All">All Status</option>
+              <option value="Pending">Pending</option>
+              <option value="Approved">Approved</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          </div>
         </div>
-        <button 
-          onClick={() => navigate('/admin/post-property')}
-          className="bg-brand-brown text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 hover:bg-amber-900 transition-colors shadow-lg shadow-brand-brown/20"
-        >
-            <PlusCircle size={18} /> Post New Property
-        </button>
       </div>
 
-      <div className="flex bg-white p-1 rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
-          {['All', 'Pending', 'Approved', 'Rejected', 'Sold'].map(tab => (
-              <button
-                  key={tab}
-                  onClick={() => setFilter(tab as any)}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${filter === tab ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-              >
-                  {tab}
-              </button>
-          ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* LIST SECTION */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
-            <div className="overflow-y-auto flex-1">
-                <table className="w-full text-sm text-left">
-                    <thead className="bg-gray-50 text-gray-500 font-bold border-b border-gray-200 sticky top-0">
-                        <tr>
-                            <th className="px-6 py-4">Property</th>
-                            <th className="px-6 py-4">Status</th>
-                            <th className="px-6 py-4">Listed By</th>
-                            <th className="px-6 py-4 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                        {filteredProperties.map(p => (
-                            <tr key={p.id} className={`hover:bg-gray-50 cursor-pointer ${selectedProp?.id === p.id ? 'bg-blue-50/50' : ''}`} onClick={() => setSelectedProp(p)}>
-                                <td className="px-6 py-4">
-                                    <div className="flex items-center gap-3">
-                                        <img src={p.images?.[0] || 'https://via.placeholder.com/150'} alt="" className="w-12 h-12 rounded-lg object-cover" />
-                                        <div>
-                                            <p className="font-bold text-gray-900 line-clamp-1">{p.title}</p>
-                                            <p className="text-xs text-gray-500">₹{p.price.toLocaleString()}</p>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <span className={`px-2 py-1 rounded-full text-xs font-bold border ${
-                                        p.status === 'Approved' ? 'bg-green-100 text-green-700 border-green-200' :
-                                        p.status === 'Pending' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
-                                        'bg-gray-100 text-gray-700 border-gray-200'
-                                    }`}>
-                                        {p.status}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-xs text-gray-600">{p.listedBy}</td>
-                                <td className="px-6 py-4 text-right">
-                                    <button 
-                                        onClick={(e) => {e.stopPropagation(); handleDelete(p.id);}}
-                                        disabled={processingId === p.id}
-                                        className="p-2 rounded hover:bg-red-100 text-red-600 disabled:opacity-50" 
-                                    >
-                                        {processingId === p.id ? <Loader2 size={16} className="animate-spin"/> : <Trash2 size={16} />}
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-                {filteredProperties.length === 0 && <div className="p-12 text-center text-gray-400">No properties found.</div>}
-            </div>
-        </div>
-
-        {/* DETAILS / ACTION PANEL */}
-        <div className="lg:col-span-1">
-            {selectedProp ? (
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 sticky top-6">
-                    <div className="flex justify-between items-start mb-4">
-                        <h2 className="text-lg font-bold text-gray-900">Details & Actions</h2>
-                        <button onClick={() => setSelectedProp(null)}><X size={20} className="text-gray-400" /></button>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <thead className="bg-gray-50 text-gray-500 text-xs uppercase font-semibold">
+            <tr>
+              <th className="px-6 py-4">Property</th>
+              <th className="px-6 py-4">Owner ID</th>
+              <th className="px-6 py-4">Date Posted</th>
+              <th className="px-6 py-4">Status</th>
+              <th className="px-6 py-4 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filteredProperties.map((property) => (
+              <tr key={property.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <img 
+                      src={property.images?.[0] || 'https://via.placeholder.com/50'} 
+                      alt="" 
+                      className="w-12 h-12 rounded-lg object-cover bg-gray-200"
+                    />
+                    <div>
+                      <p className="font-bold text-gray-900 text-sm">{property.title}</p>
+                      <p className="text-gray-500 text-xs">{property.location}</p>
+                      <p className="text-brand-green text-xs font-bold mt-0.5">₹ {property.price.toLocaleString()}</p>
                     </div>
+                  </div>
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-600 font-mono text-xs">
+                  {String(property.ownerId).substring(0, 8)}...
+                </td>
+                <td className="px-6 py-4 text-sm text-gray-600">
+                  {new Date(property.datePosted).toLocaleDateString()}
+                </td>
+                <td className="px-6 py-4">
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                    property.status === 'Approved' ? 'bg-green-100 text-green-700' :
+                    property.status === 'Rejected' ? 'bg-red-100 text-red-700' :
+                    'bg-yellow-100 text-yellow-700'
+                  }`}>
+                    {property.status}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    {/* View Button */}
+                    <button className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition" title="View Details">
+                        <Eye size={18}/>
+                    </button>
 
-                    <img src={selectedProp.images?.[0]} className="w-full h-40 object-cover rounded-lg mb-4" />
-                    <div className="mb-4">
-                        <h3 className="font-bold text-gray-800 line-clamp-2">{selectedProp.title}</h3>
-                        <p className="text-sm text-gray-500">{selectedProp.location}, {selectedProp.city}</p>
-                    </div>
-
-                    <div className="space-y-3 pt-4 border-t border-gray-100">
-                        <div className="grid grid-cols-2 gap-3">
-                            <button 
-                                onClick={() => handleStatusChange(selectedProp.id, 'Approved', true)}
-                                className="py-2 rounded-lg font-bold text-sm bg-green-600 text-white hover:bg-green-700"
-                            >
-                                Approve
-                            </button>
-                            <button 
-                                onClick={() => handleStatusChange(selectedProp.id, 'Rejected', false)}
-                                className="py-2 rounded-lg font-bold text-sm bg-red-600 text-white hover:bg-red-700"
-                            >
-                                Reject
-                            </button>
-                        </div>
-                        <Link 
-                            to={`/property/${selectedProp.id}`} target="_blank"
-                            className="w-full py-2 bg-gray-100 text-gray-700 rounded-lg font-bold text-sm hover:bg-gray-200 flex items-center justify-center gap-2"
+                    {property.status === 'Pending' && (
+                      <>
+                        <button 
+                          onClick={() => handleStatusUpdate(property.id, 'Approved')}
+                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition" 
+                          title="Approve"
                         >
-                            <Eye size={16} /> Preview
-                        </Link>
-                    </div>
-                </div>
-            ) : (
-                <div className="bg-gray-50 border border-dashed border-gray-300 rounded-xl h-full flex flex-col items-center justify-center text-gray-400 p-6 text-center">
-                    <ShieldCheck size={48} className="mb-4 opacity-50" />
-                    <p className="font-medium">Select a property to moderate.</p>
-                </div>
-            )}
-        </div>
+                          <Check size={18} />
+                        </button>
+                        <button 
+                          onClick={() => handleStatusUpdate(property.id, 'Rejected')}
+                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition" 
+                          title="Reject"
+                        >
+                          <X size={18} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        
+        {filteredProperties.length === 0 && (
+            <div className="p-8 text-center text-gray-500">No properties found matching your filters.</div>
+        )}
       </div>
     </div>
   );
