@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { PropertyType, ListingType, OwnershipType, ConstructionStatus, FurnishedStatus, Facing, ParkingType, ViewType, BrokerageType, ListedBy } from '../types';
 import { Sparkles, Upload, Loader2, CheckCircle, Home, X, AlertCircle, Camera, FileText, Dumbbell } from 'lucide-react';
@@ -34,7 +33,7 @@ const PostProperty: React.FC = () => {
     bathrooms: 1,
     balconies: 0,
     
-    // Area (At least one mandatory)
+    // Area
     carpetArea: '',
     builtUpArea: '',
     superBuiltUpArea: '',
@@ -58,7 +57,6 @@ const PostProperty: React.FC = () => {
     virtualShowcase: false,
     video3d: false,
     
-    // --- UPDATED: Amenities as Array ---
     amenities: [] as string[],
     documents: [] as string[],
     
@@ -78,7 +76,6 @@ const PostProperty: React.FC = () => {
   const additionalRoomOpts = ['Pooja Room', 'Study Room', 'Servant Room', 'Others'];
   const viewOptions: ViewType[] = ['Road', 'Park', 'Corner'];
   
-  // --- NEW: Amenity Options (Matching your Filters) ---
   const amenityOptions = [
     'Club House', 'Swimming Pool', 'Kids Play Area', 'Lift', 
     'Power Backup', 'Gym', 'Vaastu Compliant', 'Security Personnel', 
@@ -103,7 +100,6 @@ const PostProperty: React.FC = () => {
     }
   };
 
-  // --- UPDATED: Handle Array Toggle for Amenities too ---
   const handleArrayToggle = (field: 'additionalRooms' | 'views' | 'documents' | 'amenities', value: string) => {
     setFormData(prev => {
         const arr = prev[field] as string[];
@@ -142,7 +138,7 @@ const PostProperty: React.FC = () => {
     }
   }, [formData.expectedPrice, formData.superBuiltUpArea]);
 
-  // --- Submit ---
+  // --- Submit Handler (UPDATED to use Node Backend) ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) {
@@ -153,6 +149,7 @@ const PostProperty: React.FC = () => {
     setIsSubmitting(true);
     setError(null);
 
+    // 1. Validation
     if (!formData.carpetArea && !formData.builtUpArea && !formData.superBuiltUpArea) {
         const areaMsg = "At least one area type (Carpet, Built-up, or Super Built-up) is mandatory.";
         setError(areaMsg);
@@ -162,74 +159,63 @@ const PostProperty: React.FC = () => {
     }
 
     try {
-        const imageUrls: string[] = [];
-        for (const file of imageFiles) {
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${user.id}/${Date.now()}-${Math.random()}.${fileExt}`;
-            const { error: uploadErr } = await supabase.storage.from('property-images').upload(fileName, file);
-            if (uploadErr) throw uploadErr;
-            const { data: { publicUrl } } = supabase.storage.from('property-images').getPublicUrl(fileName);
-            imageUrls.push(publicUrl);
-        }
+        // 2. Prepare Form Data (Backend expects multipart/form-data)
+        const payload = new FormData();
 
-        if (imageUrls.length === 0) {
-            imageUrls.push('https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1000&q=80');
-        }
+        // Append Basic Fields
+        payload.append('owner_id', user.id);
+        payload.append('title', formData.title || `${formData.bedrooms} BHK ${formData.propertyType} in ${formData.location}`);
+        payload.append('description', formData.description);
+        payload.append('price', formData.expectedPrice);
+        payload.append('location', formData.location);
+        payload.append('city', formData.city);
+        payload.append('type', formData.propertyType);
+        payload.append('listing_type', formData.listingType);
+        
+        // Append Images (The actual File objects)
+        imageFiles.forEach(file => {
+            payload.append('images', file);
+        });
 
-        const initialStatus = (user.role === 'Admin' || user.role === 'Broker') ? 'Approved' : 'Pending';
+        // Append Numeric Fields
+        payload.append('bedrooms', formData.bedrooms.toString());
+        payload.append('bathrooms', formData.bathrooms.toString());
+        payload.append('balconies', formData.balconies.toString());
+        payload.append('carpet_area', formData.carpetArea || '0');
+        payload.append('built_up_area', formData.builtUpArea || '0');
+        payload.append('super_built_up_area', formData.superBuiltUpArea || '0');
+        payload.append('year_built', formData.yearBuilt || new Date().getFullYear().toString());
+        payload.append('floor_no', formData.floorNo || '0');
+        payload.append('total_floors', formData.totalFloors || '0');
+        payload.append('price_per_sqft', formData.pricePerSqft || '0');
+        payload.append('brokerage_amount', formData.brokerageAmount || '0');
 
-        const propertyPayload = {
-            owner_id: user.id,
-            title: formData.title || `${formData.bedrooms} BHK ${formData.propertyType} in ${formData.location}`,
-            description: formData.description,
-            price: parseFloat(formData.expectedPrice),
-            location: formData.location,
-            city: formData.city,
-            type: formData.propertyType,
-            listing_type: formData.listingType,
-            images: imageUrls, 
-            bedrooms: formData.bedrooms,
-            bathrooms: formData.bathrooms,
-            balconies: formData.balconies,
-            carpet_area: parseFloat(formData.carpetArea) || 0,
-            built_up_area: parseFloat(formData.builtUpArea) || 0,
-            super_built_up_area: parseFloat(formData.superBuiltUpArea) || 0,
-            area: parseFloat(formData.superBuiltUpArea || formData.builtUpArea || formData.carpetArea),
-            additional_rooms: formData.additionalRooms,
-            furnished_status: formData.furnishedStatus,
-            construction_status: formData.constructionStatus,
-            year_built: parseInt(formData.yearBuilt) || new Date().getFullYear(),
-            floor_no: parseInt(formData.floorNo) || 0,
-            total_floors: parseInt(formData.totalFloors) || 0,
-            facing_entry: formData.facingEntry,
-            facing_exit: formData.facingExit,
-            parking_type: formData.parkingType,
-            views: formData.views,
-            rera_approved: formData.reraApproved,
-            is_virtual_showcase: formData.virtualShowcase,
-            is_3d_video: formData.video3d,
-            
-            // --- UPDATED: Direct Array Assignment ---
-            amenities: formData.amenities, 
-            available_documents: formData.documents,
-            
-            price_per_sqft: parseFloat(formData.pricePerSqft) || 0,
-            is_all_inclusive_price: formData.allInclusive,
-            is_tax_excluded: formData.taxExcluded,
-            brokerage_type: formData.brokerageType,
-            brokerage_amount: parseFloat(formData.brokerageAmount) || 0,
-            status: initialStatus,
-            listed_by: user.role === 'Broker' ? 'Agent' : 'Owner'
-        };
+        // Append String/Enum Fields
+        payload.append('furnished_status', formData.furnishedStatus);
+        payload.append('construction_status', formData.constructionStatus);
+        payload.append('facing_entry', formData.facingEntry);
+        payload.append('facing_exit', formData.facingExit);
+        payload.append('parking_type', formData.parkingType);
+        payload.append('brokerage_type', formData.brokerageType);
+        payload.append('listed_by', user.role === 'Broker' ? 'Agent' : 'Owner');
 
-        const { error: dbError } = await supabase.from('properties').insert([propertyPayload]);
-        if (dbError) throw dbError;
+        // Append Arrays (Join as comma-separated strings for Backend)
+        payload.append('amenities', formData.amenities.join(','));
+        payload.append('available_documents', formData.documents.join(','));
+        payload.append('additional_rooms', formData.additionalRooms.join(','));
+        payload.append('views', formData.views.join(','));
 
-        if (initialStatus === 'Approved') {
-            toast.success("Property Posted Successfully! It is now Live.");
-        } else {
-            toast.success("Property Posted! It is pending Admin Approval.");
-        }
+        // 3. Send to Node.js Backend
+        const response = await fetch('http://localhost:5000/api/properties', {
+            method: 'POST',
+            body: payload, // No Content-Type needed (Browser sets it automatically for FormData)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) throw new Error(result.error || "Failed to post property");
+
+        toast.success("Property Posted Successfully! It is now Live.");
         navigate('/');
 
     } catch (err: any) {
@@ -467,7 +453,7 @@ const PostProperty: React.FC = () => {
                     </div>
                 </div>
                 
-                {/* --- UPDATED AMENITIES SECTION --- */}
+                {/* AMENITIES */}
                 <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                         <Dumbbell size={16} /> Amenities Available

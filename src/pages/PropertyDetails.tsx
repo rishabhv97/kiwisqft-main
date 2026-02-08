@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabase } from '../supabaseClient';
 import { Property } from '../types';
 import { 
   MapPin, BedDouble, Bath, Maximize, ArrowLeft, Phone, Mail, 
   ShieldCheck, CheckCircle2, User, X, Loader2, Home, Layers, 
   Compass, Calendar, Car, FileText, Info, Camera
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const PropertyDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -26,16 +26,24 @@ const PropertyDetails: React.FC = () => {
     const fetchProperty = async () => {
       if (!id) return;
       try {
-        const { data, error } = await supabase
-          .from('properties')
-          .select('*')
-          .eq('id', id)
-          .single();
-
-        if (error) throw error;
+        // CHANGED: Fetch from Local Node.js API instead of Supabase
+        const response = await fetch(`http://localhost:5000/api/properties/${id}`);
+        
+        if (!response.ok) throw new Error("Property not found");
+        
+        const data = await response.json();
 
         if (data) {
-          // --- FULL DATA MAPPING ---
+          // Parse JSON strings from DB back into Arrays
+          const images = typeof data.images === 'string' 
+              ? JSON.parse(data.images).map((img: string) => `http://localhost:5000${img}`)
+              : [];
+
+          const amenities = typeof data.amenities === 'string' ? JSON.parse(data.amenities) : [];
+          const additionalRooms = typeof data.additional_rooms === 'string' ? JSON.parse(data.additional_rooms) : [];
+          const documents = typeof data.available_documents === 'string' ? JSON.parse(data.available_documents) : [];
+          const views = typeof data.views === 'string' ? JSON.parse(data.views) : [];
+
           const mappedProperty: Property = {
             id: data.id,
             title: data.title,
@@ -46,9 +54,9 @@ const PropertyDetails: React.FC = () => {
             type: data.type,
             listingType: data.listing_type,
             
-            // Images (Handle array or fallback)
-            images: data.images && data.images.length > 0 
-              ? data.images 
+            // Images
+            images: images.length > 0 
+              ? images 
               : ['https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1200&q=80'],
 
             bedrooms: data.bedrooms,
@@ -56,22 +64,22 @@ const PropertyDetails: React.FC = () => {
             balconies: data.balconies,
             
             // Area Details
-            area: data.area, // Primary sort area
+            area: data.area, 
             carpetArea: data.carpet_area,
             builtUpArea: data.built_up_area,
             superBuiltUpArea: data.super_built_up_area,
             
-            amenities: data.amenities || [],
+            amenities: amenities,
             ownerContact: data.owner_contact,
             datePosted: data.created_at,
-            isFeatured: data.is_featured,
+            isFeatured: Boolean(data.is_featured),
             status: data.status,
             ownerId: data.owner_id,
 
             // Features & Specs
             constructionStatus: data.construction_status,
             furnishedStatus: data.furnished_status,
-            listedBy: data.listed_by, // Check your DB column name (listed_by vs listedBy)
+            listedBy: data.listed_by,
             ownershipType: data.ownership_type,
             facing: data.facing_entry,
             exitFacing: data.facing_exit,
@@ -81,23 +89,23 @@ const PropertyDetails: React.FC = () => {
             yearBuilt: data.year_built,
             
             // Arrays
-            additionalRooms: data.additional_rooms || [],
-            views: data.views || [],
-            documents: data.available_documents || [],
+            additionalRooms: additionalRooms,
+            views: views,
+            documents: documents,
             
             // Price & Brokerage
-            priceNegotiable: data.price_negotiable,
-            allInclusivePrice: data.is_all_inclusive_price,
-            taxExcluded: data.is_tax_excluded,
+            priceNegotiable: Boolean(data.price_negotiable),
+            allInclusivePrice: Boolean(data.is_all_inclusive_price),
+            taxExcluded: Boolean(data.is_tax_excluded),
             pricePerSqft: data.price_per_sqft,
             
             brokerageType: data.brokerage_type,
             brokerageAmount: data.brokerage_amount,
             
             // Media Flags
-            hasShowcase: data.is_virtual_showcase,
-            has3DVideo: data.is_3d_video,
-            reraApproved: data.rera_approved,
+            hasShowcase: Boolean(data.is_virtual_showcase),
+            has3DVideo: Boolean(data.is_3d_video),
+            reraApproved: Boolean(data.rera_approved),
             parkingType: data.parking_type
           };
           
@@ -121,20 +129,26 @@ const PropertyDetails: React.FC = () => {
 
     setSubmitLoading(true);
     try {
-        const { error } = await supabase.from('leads').insert([{
-            property_id: property.id,
-            seller_id: property.ownerId,
-            buyer_name: leadForm.name,
-            buyer_phone: leadForm.phone,
-            message: leadForm.message || `I am interested in ${property.title}`
-        }]);
+        // Send Lead to Backend API
+        const response = await fetch('http://localhost:5000/api/leads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                property_id: property.id,
+                seller_id: property.ownerId,
+                buyer_name: leadForm.name,
+                buyer_phone: leadForm.phone,
+                message: leadForm.message || `I am interested in ${property.title}`
+            })
+        });
 
-        if (error) throw error;
-        alert("Enquiry Sent! The owner will contact you shortly.");
+        if (!response.ok) throw new Error("Failed to send enquiry");
+
+        toast.success("Enquiry Sent! The owner will contact you shortly.");
         setIsContactOpen(false);
         setLeadForm({ name: '', phone: '', message: '' });
     } catch (err) {
-        alert("Failed to send enquiry.");
+        toast.error("Failed to send enquiry.");
         console.error(err);
     } finally {
         setSubmitLoading(false);
